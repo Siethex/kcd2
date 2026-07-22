@@ -43,6 +43,17 @@ if KillCountDownDB.killLog == nil then -- Added to allow local killLog  = KillCo
     KillCountDownDB.killLog = {}
 end -- 
 
+if KillCountDownDB.logWindow == nil then
+    KillCountDownDB.logWindow = {
+        point = "CENTER",
+        relativePoint = "CENTER",
+        x = 0,
+        y = 0,
+        width = 420,
+        height = 360,
+    }
+end
+
 local combatStartTime = 0
 local pendingKills = {}
 
@@ -119,30 +130,188 @@ end
 
 timerButton:SetScript("OnClick", toggleTimer)
 
--- Button: Show Kill Log
+------------------------------------------------------------
+-- Kill Log Window (separate, closable/hideable frame)
+------------------------------------------------------------
+
+local killLogFrame = CreateFrame("Frame", "KillCountDownLogFrame", UIParent, "BasicFrameTemplateWithInset")
+
+-- Restore saved size/position (falls back to the defaults set above)
+killLogFrame:SetSize(KillCountDownDB.logWindow.width, KillCountDownDB.logWindow.height)
+killLogFrame:SetPoint(
+    KillCountDownDB.logWindow.point,
+    UIParent,
+    KillCountDownDB.logWindow.relativePoint,
+    KillCountDownDB.logWindow.x,
+    KillCountDownDB.logWindow.y
+)
+
+killLogFrame:SetMovable(true)
+killLogFrame:SetResizable(true)
+killLogFrame:EnableMouse(true)
+killLogFrame:SetClampedToScreen(true)
+
+-- Min/max resize bounds (API differs by client version, so support both)
+if killLogFrame.SetResizeBounds then
+    killLogFrame:SetResizeBounds(300, 200, 800, 700) -- modern retail API
+elseif killLogFrame.SetMinResize then
+    killLogFrame:SetMinResize(300, 200)
+    killLogFrame:SetMaxResize(800, 700)
+end
+
+killLogFrame:Hide()
+
+-- ESC closes it like a normal WoW window
+tinsert(UISpecialFrames, "KillCountDownLogFrame")
+
+-- Persist whatever position/size the player leaves it at
+local function saveKillLogWindowState()
+    local point, _, relativePoint, x, y = killLogFrame:GetPoint()
+    KillCountDownDB.logWindow.point = point
+    KillCountDownDB.logWindow.relativePoint = relativePoint
+    KillCountDownDB.logWindow.x = x
+    KillCountDownDB.logWindow.y = y
+    KillCountDownDB.logWindow.width = killLogFrame:GetWidth()
+    KillCountDownDB.logWindow.height = killLogFrame:GetHeight()
+end
+
+killLogFrame:RegisterForDrag("LeftButton")
+killLogFrame:SetScript("OnDragStart", killLogFrame.StartMoving)
+killLogFrame:SetScript("OnDragStop", function(self)
+    self:StopMovingOrSizing()
+    saveKillLogWindowState()
+end)
+
+local killLogTitle = killLogFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+killLogTitle:SetPoint("TOP", killLogFrame, "TOP", 0, -6)
+killLogTitle:SetText("KillCountDown - Kill Log")
+
+-- Scroll frame + content child
+local killLogScroll = CreateFrame("ScrollFrame", "KillCountDownLogScrollFrame", killLogFrame, "UIPanelScrollFrameTemplate")
+killLogScroll:SetPoint("TOPLEFT", killLogFrame, "TOPLEFT", 12, -30)
+killLogScroll:SetPoint("BOTTOMRIGHT", killLogFrame, "BOTTOMRIGHT", -30, 44)
+
+local killLogContent = CreateFrame("Frame", nil, killLogScroll)
+killLogContent:SetSize(1, 1)
+killLogScroll:SetScrollChild(killLogContent)
+
+-- Forward declaration so earlier handlers (e.g. the resize grip) can call this
+-- before its full definition later in this section.
+local refreshKillLogWindow
+
+-- Clear Log button
+local clearLogButton = CreateFrame("Button", nil, killLogFrame, "GameMenuButtonTemplate")
+clearLogButton:SetSize(120, 24)
+clearLogButton:SetPoint("BOTTOMLEFT", killLogFrame, "BOTTOMLEFT", 14, 10)
+clearLogButton:SetText("Clear Log")
+
+-- Close button (extra, bottom-right, in addition to the built-in X)
+local closeLogButton = CreateFrame("Button", nil, killLogFrame, "GameMenuButtonTemplate")
+closeLogButton:SetSize(120, 24)
+closeLogButton:SetPoint("BOTTOMRIGHT", killLogFrame, "BOTTOMRIGHT", -14, 10)
+closeLogButton:SetText("Close")
+closeLogButton:SetScript("OnClick", function() killLogFrame:Hide() end)
+
+-- Resize grip (bottom-right corner) - drag to resize the window
+local resizeGrip = CreateFrame("Button", nil, killLogFrame)
+resizeGrip:SetSize(16, 16)
+resizeGrip:SetPoint("BOTTOMRIGHT", killLogFrame, "BOTTOMRIGHT", -4, 4)
+resizeGrip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+resizeGrip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+resizeGrip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+
+resizeGrip:SetScript("OnMouseDown", function()
+    killLogFrame:StartSizing("BOTTOMRIGHT")
+end)
+
+resizeGrip:SetScript("OnMouseUp", function()
+    killLogFrame:StopMovingOrSizing()
+    saveKillLogWindowState()
+    refreshKillLogWindow()
+end)
+
+-- Pool of reusable FontStrings so we don't leak objects on every refresh
+local logEntryPool = {}
+local logEmptyText
+
+local ROW_HEIGHT = 16
+
+refreshKillLogWindow = function()
+    local log = KillCountDownDB.killLog
+    local count = #log
+
+    for _, fs in ipairs(logEntryPool) do
+        fs:Hide()
+    end
+
+    if count == 0 then
+        if not logEmptyText then
+            logEmptyText = killLogContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            logEmptyText:SetPoint("TOPLEFT", killLogContent, "TOPLEFT", 4, -4)
+        end
+        logEmptyText:SetText("Kill Log is empty.")
+        logEmptyText:Show()
+        killLogContent:SetSize(killLogScroll:GetWidth(), killLogScroll:GetHeight())
+        return
+    elseif logEmptyText then
+        logEmptyText:Hide()
+    end
+
+    -- Most recent kill on top
+    local row = 0
+    for i = count, 1, -1 do
+        local entry = log[i]
+        row = row + 1
+
+        local fs = logEntryPool[row]
+        if not fs then
+            fs = killLogContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            fs:SetPoint("RIGHT", killLogContent, "RIGHT", -4, 0)
+            fs:SetJustifyH("LEFT")
+            fs:SetHeight(ROW_HEIGHT)
+            logEntryPool[row] = fs
+        end
+
+        fs:ClearAllPoints()
+        fs:SetPoint("TOPLEFT", killLogContent, "TOPLEFT", 4, -4 - (row - 1) * ROW_HEIGHT)
+        fs:SetPoint("RIGHT", killLogContent, "RIGHT", -4, 0)
+        fs:SetText(
+            "|cffaaaaaa[" .. entry.time .. "]|r " ..
+            entry.name ..
+            " |cff88ff88(Lvl " .. entry.level .. ")|r" ..
+            " - |cffffff00" .. entry.xp .. " XP|r"
+        )
+        fs:Show()
+    end
+
+    killLogContent:SetSize(killLogScroll:GetWidth(), math.max(count * ROW_HEIGHT + 8, killLogScroll:GetHeight()))
+end
+
+clearLogButton:SetScript("OnClick", function()
+    wipe(KillCountDownDB.killLog)
+    refreshKillLogWindow()
+    print("KillCountDown: Kill log cleared.")
+end)
+
+killLogFrame:SetScript("OnShow", refreshKillLogWindow)
+
+-- Toggles the kill log window (used by both the options button and /kcdlog)
+local function displayKillLog()
+    if killLogFrame:IsShown() then
+        killLogFrame:Hide()
+    else
+        refreshKillLogWindow()
+        killLogFrame:Show()
+    end
+end
+
+------------------------------------------------------------
+
+-- Button: Show Kill Log (opens the window instead of printing to chat)
 local logButton = CreateFrame("Button", nil, optionsFrame, "GameMenuButtonTemplate")
 logButton:SetSize(200, 30)
 logButton:SetPoint("TOP", timerButton, "BOTTOM", 0, -20)
 logButton:SetText("Show Kill Log")
-
-local function displayKillLog()
-    if #KillCountDownDB.killLog == 0 then
-        print("Kill Log is empty.")
-        return
-    end
-
-    print("---- Kill Log ----")
-
-    for _, entry in ipairs(KillCountDownDB.killLog) do
-        print(
-            "[" .. entry.time .. "] " ..
-            entry.name ..
-            " (Level " .. entry.level .. ")" ..
-            " - XP Gained: " .. entry.xp
-        )
-    end
-end
-
 logButton:SetScript("OnClick", displayKillLog)
 
 -- Slash Commands
@@ -273,6 +442,11 @@ local function OnEvent(self, event, ...)
             end
 
             pendingKills = {}
+
+            -- Keep the log window live if it's open while you're farming
+            if killLogFrame:IsShown() then
+                refreshKillLogWindow()
+            end
 
             if KillCountDownDB.notificationsEnabled then
                 displayStats()

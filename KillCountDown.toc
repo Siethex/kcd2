@@ -1,8 +1,9 @@
 ## Interface: 11509
-## Title: KCDown2
+## Title: KCDown
 ## Author: Siethex
-## Version: KCDB.0.1
-## Notes: Adding kill log, showing level, time, and interfacing into display more naturally instead of chat
+## Version: KCD 2.0.0
+## X-Flavor: HARDCORE
+## Notes: Created a seperate window frame for /kcdlog
 ## SavedVariables: KillCountDownDB
 
 KillCountDown2.lua
