@@ -6,4 +6,4 @@
 ## Notes: Created a seperate window frame for /kcdlog
 ## SavedVariables: KillCountDownDB
 
-KillCountDown2.lua
+KillCountDownV2.lua
