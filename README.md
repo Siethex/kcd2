@@ -1,5 +1,5 @@
 # KillCountDown-V2.0.0
-KCDv2 now includes a seperate moveable window for the kill log. When typing /kcdlog or going thru the menu will open a window. More accurate timing system, and less jumble. 
+KCDv2 now includes a seperate moveable window for the kill log. When typing /kcdlog or going thru the menu will open a window. More accurate timing system, and less jumble.  /kcdopt brings up menu. /kcdlog opens log menu. /kcdon /kcdoff
 
 
 # KillCountDown-V1.0.0
