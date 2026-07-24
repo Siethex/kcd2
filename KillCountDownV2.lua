@@ -9,49 +9,61 @@ local title = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 title:SetPoint("TOP", optionsFrame, "TOP", 0, -10)
 title:SetText("KillCount Options")
 
---[[ Saved Variables
-KillCountDownDB = KillCountDownDB or {}
+-- Saved Variables
+--
+-- IMPORTANT: We do NOT touch KillCountDownDB here at file-load time.
+-- WoW only injects the real saved data from the SavedVariables file into
+-- KillCountDownDB *after* all of this addon's Lua files finish executing,
+-- right before ADDON_LOADED fires. If we build/populate the table here,
+-- WoW's later restoration simply overwrites our reference wholesale, which
+-- is why fields like logWindow kept coming back nil - this is what "This
+-- code doesn't seem to keep the saved DB" was actually running into.
+--
+-- Instead, InitializeSavedVariables() is defined here but only called from
+-- the ADDON_LOADED handler further down, once KillCountDownDB is guaranteed
+-- to already be the real (or first-time-empty) saved table.
 
-KillCountDownDB.modifiedDisplay =
-    KillCountDownDB.modifiedDisplay or false
+local DEFAULT_LOG_WINDOW = {
+    point = "CENTER",
+    relativePoint = "CENTER",
+    x = 0,
+    y = 0,
+    width = 420,
+    height = 360,
+}
 
-KillCountDownDB.notificationsEnabled =
-    KillCountDownDB.notificationsEnabled ~= false
+local function InitializeSavedVariables()
+    KillCountDownDB = KillCountDownDB or {}
 
-KillCountDownDB.timerActive =
-    KillCountDownDB.timerActive or false
+    if KillCountDownDB.modifiedDisplay == nil then
+        KillCountDownDB.modifiedDisplay = false
+    end
 
-]]-- This code doesn't seem to keep the saved DB
+    if KillCountDownDB.notificationsEnabled == nil then
+        KillCountDownDB.notificationsEnabled = true
+    end
 
---Saved Variables
-KillCountDownDB = KillCountDownDB or {}
+    if KillCountDownDB.timerActive == nil then
+        KillCountDownDB.timerActive = false
+    end
 
+    -- Kill log lives in its own per-character saved variable (see the .toc
+    -- note below) so it doesn't get shared across every toon on the account.
+    KillCountDownCharDB = KillCountDownCharDB or {}
+    if KillCountDownCharDB.killLog == nil then
+        KillCountDownCharDB.killLog = {}
+    end
 
-if KillCountDownDB.modifiedDisplay == nil then
-    KillCountDownDB.modifiedDisplay = false
-end
-
-if KillCountDownDB.notificationsEnabled == nil then
-    KillCountDownDB.notificationsEnabled = true
-end
-
-if KillCountDownDB.timerActive == nil then
-    KillCountDownDB.timerActive = false
-end
-
-if KillCountDownDB.killLog == nil then -- Added to allow local killLog  = KillCountDB.killLog to work...hopefuly
-    KillCountDownDB.killLog = {}
-end -- 
-
-if KillCountDownDB.logWindow == nil then
-    KillCountDownDB.logWindow = {
-        point = "CENTER",
-        relativePoint = "CENTER",
-        x = 0,
-        y = 0,
-        width = 420,
-        height = 360,
-    }
+    if KillCountDownDB.logWindow == nil then
+        KillCountDownDB.logWindow = {
+            point = DEFAULT_LOG_WINDOW.point,
+            relativePoint = DEFAULT_LOG_WINDOW.relativePoint,
+            x = DEFAULT_LOG_WINDOW.x,
+            y = DEFAULT_LOG_WINDOW.y,
+            width = DEFAULT_LOG_WINDOW.width,
+            height = DEFAULT_LOG_WINDOW.height,
+        }
+    end
 end
 
 local combatStartTime = 0
@@ -136,14 +148,17 @@ timerButton:SetScript("OnClick", toggleTimer)
 
 local killLogFrame = CreateFrame("Frame", "KillCountDownLogFrame", UIParent, "BasicFrameTemplateWithInset")
 
--- Restore saved size/position (falls back to the defaults set above)
-killLogFrame:SetSize(KillCountDownDB.logWindow.width, KillCountDownDB.logWindow.height)
+-- Placeholder size/position at load time. KillCountDownDB.logWindow doesn't
+-- exist yet here (see the Saved Variables note above) - the real saved
+-- position/size gets applied to this frame once ADDON_LOADED fires and
+-- InitializeSavedVariables() has run.
+killLogFrame:SetSize(DEFAULT_LOG_WINDOW.width, DEFAULT_LOG_WINDOW.height)
 killLogFrame:SetPoint(
-    KillCountDownDB.logWindow.point,
+    DEFAULT_LOG_WINDOW.point,
     UIParent,
-    KillCountDownDB.logWindow.relativePoint,
-    KillCountDownDB.logWindow.x,
-    KillCountDownDB.logWindow.y
+    DEFAULT_LOG_WINDOW.relativePoint,
+    DEFAULT_LOG_WINDOW.x,
+    DEFAULT_LOG_WINDOW.y
 )
 
 killLogFrame:SetMovable(true)
@@ -163,6 +178,15 @@ killLogFrame:Hide()
 
 -- ESC closes it like a normal WoW window
 tinsert(UISpecialFrames, "KillCountDownLogFrame")
+
+-- Apply the real saved position/size once KillCountDownDB.logWindow exists
+-- (called from ADDON_LOADED, after InitializeSavedVariables() has run)
+local function applyKillLogWindowState()
+    local saved = KillCountDownDB.logWindow
+    killLogFrame:ClearAllPoints()
+    killLogFrame:SetSize(saved.width, saved.height)
+    killLogFrame:SetPoint(saved.point, UIParent, saved.relativePoint, saved.x, saved.y)
+end
 
 -- Persist whatever position/size the player leaves it at
 local function saveKillLogWindowState()
@@ -237,7 +261,7 @@ local logEmptyText
 local ROW_HEIGHT = 16
 
 refreshKillLogWindow = function()
-    local log = KillCountDownDB.killLog
+    local log = KillCountDownCharDB.killLog
     local count = #log
 
     for _, fs in ipairs(logEntryPool) do
@@ -288,7 +312,7 @@ refreshKillLogWindow = function()
 end
 
 clearLogButton:SetScript("OnClick", function()
-    wipe(KillCountDownDB.killLog)
+    wipe(KillCountDownCharDB.killLog)
     refreshKillLogWindow()
     print("KillCountDown: Kill log cleared.")
 end)
@@ -359,7 +383,7 @@ local function displayStats()
     end
 end
 
--- Combat Timer
+-- Combat Timer  I want to refine it a bit more, finding it won't do hours even when added.
 local function startCombatTimer()
     combatStartTime = GetTime()
 end
@@ -393,6 +417,21 @@ end
 -- Event Handler
 local function OnEvent(self, event, ...)
 
+    if event == "ADDON_LOADED" then
+        local loadedAddonName = ...
+
+        if loadedAddonName == "KillCountDown" then
+            -- KillCountDownDB is now the REAL saved table (or a fresh one on
+            -- first-ever load) - safe to fill in any missing defaults here.
+            InitializeSavedVariables()
+            applyKillLogWindowState()
+
+            updateModifiedDisplayButton()
+            updateNotificationsButton()
+            updateTimerButton()
+        end
+    end
+
     if event == "PLAYER_LOGIN" then
 
         local currentXP = UnitXP("player")
@@ -407,7 +446,7 @@ local function OnEvent(self, event, ...)
 
         print("KillCountDown Loaded! Type /kcdopt for options.")
     end
-
+        --Calling information. 
     if event == "PLAYER_XP_UPDATE" then
 
         local currentXP = UnitXP("player")
@@ -428,16 +467,16 @@ local function OnEvent(self, event, ...)
 
             for _, kill in ipairs(pendingKills) do
 
-                table.insert(KillCountDownDB.killLog, {
+                table.insert(KillCountDownCharDB.killLog, {
                     name = kill.name,
                     level = kill.level,
                     xp = splitXP,
                     time = kill.time
                 })
 
-                -- Limit log size
-                if #KillCountDownDB.killLog > 500 then
-                    table.remove(KillCountDownDB.killLog, 1)
+                -- Limit log size but I want to make it where the user can adjust later
+                if #KillCountDownCharDB.killLog > 500 then
+                    table.remove(KillCountDownCharDB.killLog, 1)
                 end
             end
 
@@ -486,6 +525,7 @@ end
 -- Register Events
 local frame = CreateFrame("Frame")
 
+frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("PLAYER_XP_UPDATE")
 frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
