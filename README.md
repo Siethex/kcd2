@@ -1,3 +1,7 @@
+# KillCountDown-V2.0.02
+Corrected to consist Kill log, and kill level stamps. Now when you level a time stamp is logged together with the kill log. When you first log in, /kcdopt opens the menu and you can select time stamps. By selecting this the game now times with your /played. You can see your minutes on each level once tracking. 
+Commands::  /kcdopt - Opens the menu :: /kcdlog - opens the kill log. /kcdstamp - Opens the level stamp. Where when you level it records the time from when you started the stamp. Turn on the stamp by accessing /kcdopt.
+
 # KillCountDown-V2.0.01
 Corrected LUA error when moving the killlog. Corrected Kill Log not to share with other characters. KCD now detects exploration and quest VS kills. 
 
@@ -7,7 +11,7 @@ KCDv2 now includes a seperate moveable window for the kill log. When typing /kcd
 
 # KillCountDown-V1.0.0
 The original KCD was simple and still is! This is a more involved addon that takes the time you spent in your session and calculates how long it will be to level, while keeping a log of your kills. XP per hour, and what you killed with a time stamp.
-
+gi
 Commands. /kcdopt : opens up option menu where you set your preference. tired of seeing it pop up every kill? Modified mode, or turn it off. if you turn notifications off it also impacts Timer at this time.
 
 /kcdlog : can print log directly instead of going thru /kcdopt
