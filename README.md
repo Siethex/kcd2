@@ -1,3 +1,6 @@
+# KillCountDown-V2.0.01
+Corrected LUA error when moving the killlog. Corrected Kill Log not to share with other characters. KCD now detects exploration and quest VS kills. 
+
 # KillCountDown-V2.0.0
 KCDv2 now includes a seperate moveable window for the kill log. When typing /kcdlog or going thru the menu will open a window. More accurate timing system, and less jumble.  /kcdopt brings up menu. /kcdlog opens log menu. /kcdon /kcdoff
 

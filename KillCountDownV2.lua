@@ -4,6 +4,25 @@ optionsFrame:SetSize(300, 300)
 optionsFrame:SetPoint("CENTER")
 optionsFrame:Hide() -- Hideen by default duh
 
+
+optionsFrame:SetScript("OnShow", function(self)
+    self:EnableKeyboard(true)
+    self:Raise()
+end)
+
+optionsFrame:SetScript("OnHide", function(self)
+    self:EnableKeyboard(false)
+end)
+
+optionsFrame:SetScript("OnKeyDown", function(self, key)
+    if key == "ESCAPE" then
+        self:Hide()
+        self:SetPropagateKeyboardInput(false)
+    else
+        self:SetPropagateKeyboardInput(true)
+    end
+end)
+
 -- Title for the frame
 local title = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 title:SetPoint("TOP", optionsFrame, "TOP", 0, -10)
@@ -176,9 +195,6 @@ end
 
 killLogFrame:Hide()
 
--- ESC closes it like a normal WoW window
-tinsert(UISpecialFrames, "KillCountDownLogFrame")
-
 -- Apply the real saved position/size once KillCountDownDB.logWindow exists
 -- (called from ADDON_LOADED, after InitializeSavedVariables() has run)
 local function applyKillLogWindowState()
@@ -317,7 +333,24 @@ clearLogButton:SetScript("OnClick", function()
     print("KillCountDown: Kill log cleared.")
 end)
 
-killLogFrame:SetScript("OnShow", refreshKillLogWindow)
+killLogFrame:SetScript("OnShow", function(self)
+    refreshKillLogWindow()
+    self:EnableKeyboard(true)
+    self:Raise()
+end)
+
+killLogFrame:SetScript("OnHide", function(self)
+    self:EnableKeyboard(false)
+end)
+
+killLogFrame:SetScript("OnKeyDown", function(self, key)
+    if key == "ESCAPE" then
+        self:Hide()
+        self:SetPropagateKeyboardInput(false)
+    else
+        self:SetPropagateKeyboardInput(true)
+    end
+end)
 
 -- Toggles the kill log window (used by both the options button and /kcdlog)
 local function displayKillLog()
@@ -338,6 +371,34 @@ logButton:SetPoint("TOP", timerButton, "BOTTOM", 0, -20)
 logButton:SetText("Show Kill Log")
 logButton:SetScript("OnClick", displayKillLog)
 
+------------------------------------------------------------
+-- Shared namespace
+--
+-- optionsFrame and its buttons above are all `local` to this file, so a
+-- second addon file (e.g. a level-stamp module) can't reach them directly.
+-- This small global table is the hand-off point: other files can call
+-- KillCountDown.AddOptionsButton(...) to stack a new button onto the
+-- options panel (growing the frame to fit) without needing anything else
+-- from this file.
+------------------------------------------------------------
+KillCountDown = KillCountDown or {}
+KillCountDown.optionsFrame = optionsFrame
+
+local lastOptionsButton = logButton
+
+function KillCountDown.AddOptionsButton(text, onClick)
+    local button = CreateFrame("Button", nil, optionsFrame, "GameMenuButtonTemplate")
+    button:SetSize(200, 30)
+    button:SetPoint("TOP", lastOptionsButton, "BOTTOM", 0, -20)
+    button:SetText(text)
+    button:SetScript("OnClick", onClick)
+
+    lastOptionsButton = button
+    optionsFrame:SetHeight(optionsFrame:GetHeight() + 50)
+
+    return button
+end
+
 -- Slash Commands
 SLASH_KCDOPT1 = "/kcdopt"
 
@@ -353,7 +414,7 @@ SLASH_KCDLOG1 = "/kcdlog"
 SlashCmdList["KCDLOG"] = displayKillLog
 
 -- XP Display
-local function displayStats()
+local function displayStats(isKillGain, xpGained)
     local currentXP = UnitXP("player")
     local maxXP = UnitXPMax("player")
     local xpRemaining = maxXP - currentXP
@@ -365,25 +426,39 @@ local function displayStats()
         xpPerHour = math.floor((sessionXP / sessionTime) * 3600)
     end
 
+    -- lastKillXP only updates on actual kills, so this stays a real
+    -- "kills needed" estimate even when the current gain was from a quest
+    -- turn-in or exploration.
     if lastKillXP <= 0 then
         return
     end
 
+    local sourceLabel = isKillGain and "a kill" or "a quest or exploration"
+
     if KillCountDownDB.modifiedDisplay then
-        print(
-            "You need approximately " ..
-            math.ceil(xpRemaining / lastKillXP) ..
-            " more kills to level up."
-        )
+        if isKillGain then
+            print(
+                "You need approximately " ..
+                math.ceil(xpRemaining / lastKillXP) ..
+                " more kills to level up."
+            )
+        else
+            print(
+                "You gained " .. xpGained .. " XP from " .. sourceLabel ..
+                ". Still need approximately " ..
+                math.ceil(xpRemaining / lastKillXP) ..
+                " kills (at your current kill rate) to level up."
+            )
+        end
     else
-        print("You gained " .. lastKillXP .. " XP!")
+        print("You gained " .. xpGained .. " XP from " .. sourceLabel .. "!")
         print("Remaining XP: " .. xpRemaining)
-        print("Estimated Kills Needed: " .. math.ceil(xpRemaining / lastKillXP))
+        print("Estimated Kills Needed (at current kill rate): " .. math.ceil(xpRemaining / lastKillXP))
         print("XP Per Hour: " .. xpPerHour)
     end
 end
 
--- Combat Timer  I want to refine it a bit more, finding it won't do hours even when added.
+-- Combat Timer
 local function startCombatTimer()
     combatStartTime = GetTime()
 end
@@ -446,7 +521,7 @@ local function OnEvent(self, event, ...)
 
         print("KillCountDown Loaded! Type /kcdopt for options.")
     end
-        --Calling information. 
+
     if event == "PLAYER_XP_UPDATE" then
 
         local currentXP = UnitXP("player")
@@ -456,7 +531,12 @@ local function OnEvent(self, event, ...)
 
         if xpGained > 0 then
 
-            lastKillXP = xpGained
+            local isKillGain = #pendingKills > 0
+
+            if isKillGain then
+                lastKillXP = xpGained
+            end
+
             sessionXP = sessionXP + xpGained
 
             local splitXP = xpGained
@@ -474,7 +554,7 @@ local function OnEvent(self, event, ...)
                     time = kill.time
                 })
 
-                -- Limit log size but I want to make it where the user can adjust later
+                -- Limit log size
                 if #KillCountDownCharDB.killLog > 500 then
                     table.remove(KillCountDownCharDB.killLog, 1)
                 end
@@ -482,13 +562,13 @@ local function OnEvent(self, event, ...)
 
             pendingKills = {}
 
-            -- Keep the log window live if it's open while you're farming
+            -- Keep the log window live if it's open while farming.
             if killLogFrame:IsShown() then
                 refreshKillLogWindow()
             end
 
             if KillCountDownDB.notificationsEnabled then
-                displayStats()
+                displayStats(isKillGain, xpGained)
             end
         end
     end

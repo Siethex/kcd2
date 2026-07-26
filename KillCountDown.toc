@@ -1,9 +1,11 @@
 ## Interface: 11509
 ## Title: KCDown
 ## Author: Siethex
-## Version: KCD 2.0.0
+## Version: KCD 2.0.02
 ## X-Flavor: HARDCORE
-## Notes: Created a seperate window frame for /kcdlog
+## Notes: Created a seperate window frame for /kcdlog Fixed LUA bug when moving kill log.
 ## SavedVariables: KillCountDownDB
+## SavedVariablesPerCharacter: KillCountDownCharDB
 
 KillCountDownV2.lua
+KillCountDownLevelStamp.lua
