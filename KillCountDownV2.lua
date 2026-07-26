@@ -343,15 +343,6 @@ killLogFrame:SetScript("OnHide", function(self)
     self:EnableKeyboard(false)
 end)
 
-killLogFrame:SetScript("OnKeyDown", function(self, key)
-    if key == "ESCAPE" then
-        self:Hide()
-        self:SetPropagateKeyboardInput(false)
-    else
-        self:SetPropagateKeyboardInput(true)
-    end
-end)
-
 -- Toggles the kill log window (used by both the options button and /kcdlog)
 local function displayKillLog()
     if killLogFrame:IsShown() then
